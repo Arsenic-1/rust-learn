@@ -98,7 +98,7 @@ impl Player {
 
 fn main() -> eyre::Result<()> {
     // This will error
-    let player = Player::new(Vec2::new(0.0, 0.0), UnitVec2::new(0.0, 0.0)?);
+    let player = Player::new(Vec2::new(0.0, 0.0), UnitVec2::new(1.0, 0.0)?);
     println!("{:?}", player);
 
     Ok(())
