@@ -1,40 +1,53 @@
 use eyre::{Result, eyre};
-use num_traits::{Num, NumCast, Signed};
+use num_traits::{Float, Num, NumCast, Signed};
 use std::fmt::Debug;
 
-trait Vec2Like<T: Num + NumCast + Copy> {
+/// Trait alias for numeric types that can be used in `Vec2`.
+pub trait Scalar: Num + NumCast + Copy {}
+impl<T: Num + NumCast + Copy> Scalar for T {}
+
+/// Trait alias for floating-point types that can also be cast from other numbers.
+pub trait FloatCast: Float + NumCast {}
+impl<T: Float + NumCast> FloatCast for T {}
+
+/// Trait for 2D vector-like types.
+trait Vec2Like<T: Scalar> {
     fn x(&self) -> T;
     fn y(&self) -> T;
 
-    fn length(&self) -> Result<f64> {
-        let x: f64 = NumCast::from(self.x()).ok_or_else(|| eyre!("Failed to cast x"))?;
-        let y: f64 = NumCast::from(self.y()).ok_or_else(|| eyre!("Failed to cast y"))?;
-        Ok((x * x + y * y).sqrt())
+    /// Euclidean length of the vector as a floating-point value.
+    fn length<F: FloatCast>(&self) -> F {
+        let x = F::from(self.x()).expect("cast failed");
+        let y = F::from(self.y()).expect("cast failed");
+
+        (x * x + y * y).sqrt()
     }
 
-    fn distance<U: Vec2Like<T>>(&self, other: &U) -> Result<f64> {
-        let dx_val = other.x() - self.x();
-        let dy_val = other.y() - self.y();
-        let dx: f64 = NumCast::from(dx_val).ok_or_else(|| eyre!("Failed to cast dx"))?;
-        let dy: f64 = NumCast::from(dy_val).ok_or_else(|| eyre!("Failed to cast dy"))?;
-        Ok((dx * dx + dy * dy).sqrt())
+    /// Euclidean distance between `self` and another vector.
+    fn distance<F: FloatCast>(&self, other: &impl Vec2Like<T>) -> F {
+        let dx = F::from(other.x() - self.x()).expect("cast failed");
+        let dy = F::from(other.y() - self.y()).expect("cast failed");
+
+        (dx * dx + dy * dy).sqrt()
     }
 
-    fn abs(&self) -> Result<Vec2<T>>
+    /// Absolute value per component (only for signed types).
+    fn abs(&self) -> Vec2<T>
     where
         T: Signed,
     {
-        Ok(Vec2::new(self.x().abs(), self.y().abs()))
+        Vec2::new(self.x().abs(), self.y().abs())
     }
 }
 
+/// A generic 2D vector type.
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Vec2<T: Num + NumCast + Copy> {
+struct Vec2<T: Scalar> {
     x: T,
     y: T,
 }
 
-impl<T: Num + NumCast + Copy> Vec2Like<T> for Vec2<T> {
+impl<T: Scalar> Vec2Like<T> for Vec2<T> {
     fn x(&self) -> T {
         self.x
     }
@@ -44,19 +57,20 @@ impl<T: Num + NumCast + Copy> Vec2Like<T> for Vec2<T> {
     }
 }
 
-impl<T: Num + NumCast + Copy> Vec2<T> {
+impl<T: Scalar> Vec2<T> {
     fn new(x: T, y: T) -> Self {
         Self { x, y }
     }
 
-    fn normalize(self) -> Result<UnitVec2<f64>> {
-        let len = self.length()?;
-        if len == 0.0 {
+    /// Normalize into a `UnitVec2`, erroring if zero-length.
+    fn normalize<F: FloatCast>(self) -> Result<UnitVec2<F>> {
+        let len = self.length::<F>();
+        if len == F::zero() {
             return Err(eyre!("Cannot normalize a zero-length vector"));
         }
 
-        let x: f64 = NumCast::from(self.x).ok_or_else(|| eyre!("Failed to cast x"))?;
-        let y: f64 = NumCast::from(self.y).ok_or_else(|| eyre!("Failed to cast y"))?;
+        let x = F::from(self.x).expect("cast failed");
+        let y = F::from(self.y).expect("cast failed");
 
         Ok(UnitVec2 {
             x: x / len,
@@ -65,13 +79,32 @@ impl<T: Num + NumCast + Copy> Vec2<T> {
     }
 }
 
+impl<T: Scalar> From<(T, T)> for Vec2<T> {
+    fn from((x, y): (T, T)) -> Self {
+        Vec2::new(x, y)
+    }
+}
+
+impl<T: Scalar> From<[T; 2]> for Vec2<T> {
+    fn from([x, y]: [T; 2]) -> Self {
+        Vec2::new(x, y)
+    }
+}
+
+impl<T: Scalar> Into<(T, T)> for Vec2<T> {
+    fn into(self) -> (T, T) {
+        (self.x, self.y)
+    }
+}
+
+/// A 2D unit vector (always length = 1).
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct UnitVec2<T: Num + NumCast + Copy> {
+struct UnitVec2<T: Scalar> {
     x: T,
     y: T,
 }
 
-impl<T: Num + NumCast + Copy> Vec2Like<T> for UnitVec2<T> {
+impl<T: Scalar> Vec2Like<T> for UnitVec2<T> {
     fn x(&self) -> T {
         self.x
     }
@@ -81,28 +114,28 @@ impl<T: Num + NumCast + Copy> Vec2Like<T> for UnitVec2<T> {
     }
 }
 
-impl UnitVec2<f64> {
-    fn new<T: Num + NumCast + Copy>(x: T, y: T) -> Result<Self> {
-        Vec2::new(x, y).normalize()
+impl<F: FloatCast> UnitVec2<F> {
+    fn new<T: Scalar>(x: T, y: T) -> Result<Self> {
+        Vec2::new(x, y).normalize::<F>()
     }
 
-    fn from_vec2<T: Num + NumCast + Copy>(v: Vec2<T>) -> Result<Self> {
-        v.normalize()
+    fn from_vec2<T: Scalar>(v: Vec2<T>) -> Result<Self> {
+        v.normalize::<F>()
     }
 
-    fn as_vec2(self) -> Vec2<f64> {
+    fn as_vec2(self) -> Vec2<F> {
         Vec2::new(self.x, self.y)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-struct Player<T: Num + NumCast + Copy> {
+struct Player<T: Scalar, F: FloatCast> {
     position: Vec2<T>,
-    direction: UnitVec2<f64>,
+    direction: UnitVec2<F>,
 }
 
-impl<T: Num + NumCast + Copy> Player<T> {
-    fn new(position: Vec2<T>, direction: UnitVec2<f64>) -> Self {
+impl<T: Scalar, F: FloatCast> Player<T, F> {
+    fn new(position: Vec2<T>, direction: UnitVec2<F>) -> Self {
         Self {
             position,
             direction,
@@ -111,24 +144,28 @@ impl<T: Num + NumCast + Copy> Player<T> {
 }
 
 fn main() -> Result<()> {
-    // i8
-    let player_i8 = Player::new(Vec2::new(3i8, 4i8), UnitVec2::new(1i8, 0i8)?);
+    let player_i8 = Player::new((3i8, 4i8).into(), UnitVec2::<f32>::new(1i8, 0i8)?);
     println!("i8 player: {:?}", player_i8);
 
-    // u128
-    let player_u128 = Player::new(Vec2::new(3u128, 4u128), UnitVec2::new(0u128, 1u128)?);
+    let player_u128 = Player::new((3u128, 4u128).into(), UnitVec2::<f64>::new(0u128, 1u128)?);
     println!("u128 player: {:?}", player_u128);
 
-    // isize
-    let player_isize = Player::new(Vec2::new(3isize, 4isize), UnitVec2::new(1isize, 0isize)?);
+    let player_isize = Player::new(
+        (3isize, 4isize).into(),
+        UnitVec2::<f32>::new(1isize, 0isize)?,
+    );
     println!("isize player: {:?}", player_isize);
 
-    // f32
-    let player_f32 = Player::new(Vec2::new(3.0f32, 4.0f32), UnitVec2::new(1.0f32, 0.0f32)?);
+    let player_f32 = Player::new(
+        (3.0f32, 4.0f32).into(),
+        UnitVec2::<f32>::new(1.0f32, 0.0f32)?,
+    );
     println!("f32 player: {:?}", player_f32);
 
-    // f64
-    let player_f64 = Player::new(Vec2::new(3.0f64, 4.0f64), UnitVec2::new(1.0f64, 0.0f64)?);
+    let player_f64 = Player::new(
+        (3.0f64, 4.0f64).into(),
+        UnitVec2::<f64>::new(1.0f64, 0.0f64)?,
+    );
     println!("f64 player: {:?}", player_f64);
 
     Ok(())
